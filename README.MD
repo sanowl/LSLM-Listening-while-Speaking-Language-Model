@@ -72,4 +72,4 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## Acknowledgments
 
-We would like to express our gratitude to the authors of the original paper for their innovative work in full duplex modeling for interactive speech language models.
+i would like to express our gratitude to the authors of the original paper for their innovative work in full duplex modeling for interactive speech language models.
