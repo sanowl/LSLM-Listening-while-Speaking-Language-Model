@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, random_split
-from torch.optim import Optimizer, AdamW  # Import Optimizer correctly, and AdamW specifically
+from torch.optim import AdamW  # Import AdamW correctly
 import torchaudio
 from typing import List, Tuple
 from model import LSLM
@@ -37,7 +37,7 @@ def main() -> None:
     model: LSLM = LSLM(VOCAB_SIZE, D_MODEL, NHEAD, NUM_LAYERS, NUM_AUDIO_TOKENS).to(device)
     
     # Initialize optimizer and loss function
-    optimizer: Optimizer = AdamW(model.parameters(), lr=5e-4)
+    optimizer: AdamW = AdamW(model.parameters(), lr=5e-4)  # Ensure correct usage of AdamW
     criterion: nn.CrossEntropyLoss = nn.CrossEntropyLoss()
 
     # Training
