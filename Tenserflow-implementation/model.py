@@ -1,13 +1,23 @@
 import tensorflow as tf
 from transformers import TFWav2Vec2Model
-from typing import Tuple, List
+from typing import Tuple, List, Optional
 import numpy as np
 
 class LSLM(tf.keras.Model):
     """
-    The main model class for the Listening and Speaking Language Model (LSLM).
+    Listening and Speaking Language Model (LSLM) class.
+    This model integrates speaking and listening capabilities using advanced
+    neural network architectures.
     """
-    def __init__(self, vocab_size: int, d_model: int, nhead: int, num_layers: int, num_audio_tokens: int):
+    def __init__(
+        self,
+        vocab_size: int,
+        d_model: int,
+        nhead: int,
+        num_layers: int,
+        num_audio_tokens: int,
+        fusion_type: str = 'middle'
+    ):
         super(LSLM, self).__init__()
         self.vocab_size = vocab_size
         self.d_model = d_model
@@ -16,13 +26,13 @@ class LSLM(tf.keras.Model):
         # Model components
         self.speaking_encoder = SpeakingEncoder(vocab_size, d_model, num_audio_tokens)
         self.listening_encoder = ListeningEncoder(d_model)
-        self.fusion_module = FusionModule(d_model)
+        self.fusion_module = FusionModule(d_model, fusion_type)
         self.decoder = Decoder(vocab_size, d_model, nhead, num_layers)
         self.turn_taking_detector = TurnTakingDetector(d_model)
         self.vocoder = Vocoder(d_model, num_audio_tokens)
 
-        # Special token for interrupt requests
-        self.irq_token = vocab_size  
+        # Special token for interrupt requests (IRQ)
+        self.irq_token = vocab_size  # Assuming IRQ token is at the end of the vocabulary
 
     def call(self, inputs: Tuple[tf.Tensor, tf.Tensor], training=False):
         """
@@ -31,6 +41,9 @@ class LSLM(tf.keras.Model):
         Args:
             inputs: A tuple containing speaking_input and listening_input.
             training: Boolean indicating whether the call is during training.
+
+        Returns:
+            Output logits or generated tokens.
         """
         speaking_input, listening_input = inputs
 
@@ -60,14 +73,17 @@ class LSLM(tf.keras.Model):
         Args:
             context: Tensor containing the initial context tokens.
             max_length: Maximum length of the generated sequence.
+
+        Returns:
+            Generated audio waveform.
         """
         batch_size = tf.shape(context)[0]
         generated_tokens = []
         for _ in tf.range(max_length):
             # No listening input during generation; use zeros
             listening_input = tf.zeros((batch_size, 1, self.d_model))
-            output = self.call((context, listening_input), training=False)
-            predicted_token = tf.argmax(output, axis=-1)[:, -1:]  # Get the last token
+            output_logits = self.call((context, listening_input), training=False)
+            predicted_token = tf.argmax(output_logits, axis=-1)[:, -1:]  # Get the last token
             generated_tokens.append(predicted_token)
 
             # Check for IRQ token
@@ -78,7 +94,7 @@ class LSLM(tf.keras.Model):
             context = tf.concat([context, predicted_token], axis=1)
 
         # Concatenate all generated tokens
-        generated_sequence = tf.concat(generated_tokens, axis=1)
+        generated_sequence = tf.concat(generated_tokens, axis=1)  # [batch_size, seq_len]
         # Generate audio from tokens using vocoder
         generated_audio = self.vocoder(generated_sequence, training=False)
         return generated_audio
@@ -112,24 +128,43 @@ class AudioQuantizer(tf.keras.layers.Layer):
         self.num_tokens = num_tokens
         self.d_model = d_model
         # Codebook for vector quantization
+        initializer = tf.keras.initializers.RandomNormal(mean=0., stddev=1.)
         self.codebook = self.add_weight(
             shape=(num_tokens, d_model),
-            initializer='random_normal',
+            initializer=initializer,
             trainable=True,
             name='codebook'
         )
 
     def call(self, x, training=False):
-        # Expand dimensions for broadcasting
-        x_expanded = tf.expand_dims(x, -2)  # [batch_size, seq_len, 1, d_model]
-        codebook_expanded = tf.reshape(self.codebook, [1, 1, self.num_tokens, self.d_model])  # [1, 1, num_tokens, d_model]
+        """
+        Quantize the input vectors.
 
-        # Compute L2 distances
-        distances = tf.norm(x_expanded - codebook_expanded, axis=-1)  # [batch_size, seq_len, num_tokens]
-        indices = tf.argmin(distances, axis=-1)  # [batch_size, seq_len]
+        Args:
+            x: Input tensor of shape [batch_size, seq_len, d_model].
+            training: Boolean indicating whether the call is during training.
 
-        # Quantized embeddings
-        quantized = tf.nn.embedding_lookup(self.codebook, indices)
+        Returns:
+            Quantized embeddings.
+        """
+        # Flatten batch and sequence dimensions
+        flat_x = tf.reshape(x, [-1, self.d_model])  # [batch_size * seq_len, d_model]
+        distances = (
+            tf.reduce_sum(flat_x**2, axis=1, keepdims=True)
+            - 2 * tf.matmul(flat_x, self.codebook, transpose_b=True)
+            + tf.reduce_sum(self.codebook**2, axis=1)
+        )  # [batch_size * seq_len, num_tokens]
+
+        # Get closest codebook vectors
+        encoding_indices = tf.argmin(distances, axis=1)
+        quantized = tf.nn.embedding_lookup(self.codebook, encoding_indices)
+
+        # Reshape back to original dimensions
+        quantized = tf.reshape(quantized, tf.shape(x))
+
+        if training:
+            # Straight-through estimator
+            quantized = x + tf.stop_gradient(quantized - x)
         return quantized
 
 class ListeningEncoder(tf.keras.layers.Layer):
@@ -143,7 +178,14 @@ class ListeningEncoder(tf.keras.layers.Layer):
         self.projection = tf.keras.layers.Dense(d_model)
 
     def call(self, x, training=False):
-        # x: [batch_size, audio_length]
+        """
+        Args:
+            x: Input tensor of shape [batch_size, audio_length].
+            training: Boolean indicating whether the call is during training.
+
+        Returns:
+            Feature representations of shape [batch_size, seq_len, d_model].
+        """
         # Extract hidden states from Wav2Vec2
         hidden_states = self.wav2vec(x, training=training).last_hidden_state
         # Project to desired dimension
@@ -169,6 +211,14 @@ class FusionModule(tf.keras.layers.Layer):
             raise ValueError(f"Invalid fusion_type '{fusion_type}'. Choose from 'early', 'middle', or 'late'.")
 
     def call(self, inputs: List[tf.Tensor], training=False):
+        """
+        Args:
+            inputs: List containing speaking_features and listening_features.
+            training: Boolean indicating whether the call is during training.
+
+        Returns:
+            Fused feature representations.
+        """
         speaking_features, listening_features = inputs
         if self.fusion_type == 'early':
             fused = self.fusion_layer(tf.concat([speaking_features, listening_features], axis=-1))
@@ -190,6 +240,14 @@ class Decoder(tf.keras.layers.Layer):
         self.output_layer = tf.keras.layers.Dense(vocab_size + 1)  # +1 for IRQ token
 
     def call(self, x, training=False):
+        """
+        Args:
+            x: Input tensor of shape [batch_size, seq_len, d_model].
+            training: Boolean indicating whether the call is during training.
+
+        Returns:
+            Logits of shape [batch_size, seq_len, vocab_size + 1].
+        """
         for layer in self.layers:
             x = layer(x, training=training)
         logits = self.output_layer(x)
@@ -211,6 +269,14 @@ class DecoderLayer(tf.keras.layers.Layer):
         self.dropout = tf.keras.layers.Dropout(0.1)
 
     def call(self, x, training=False):
+        """
+        Args:
+            x: Input tensor of shape [batch_size, seq_len, d_model].
+            training: Boolean indicating whether the call is during training.
+
+        Returns:
+            Output tensor of shape [batch_size, seq_len, d_model].
+        """
         attn_output = self.self_attention(x, x, training=training)
         x = self.layer_norm1(x + self.dropout(attn_output, training=training))
         ff_output = self.feed_forward(x)
@@ -223,10 +289,20 @@ class TurnTakingDetector(tf.keras.layers.Layer):
     """
     def __init__(self, d_model: int):
         super(TurnTakingDetector, self).__init__()
-        self.lstm = tf.keras.layers.Bidirectional(tf.keras.layers.LSTM(d_model // 2, return_sequences=True))
+        self.lstm = tf.keras.layers.Bidirectional(
+            tf.keras.layers.LSTM(d_model // 2, return_sequences=True)
+        )
         self.fc = tf.keras.layers.Dense(1, activation='sigmoid')
 
     def call(self, x, training=False):
+        """
+        Args:
+            x: Input tensor of shape [batch_size, seq_len, d_model].
+            training: Boolean indicating whether the call is during training.
+
+        Returns:
+            Turn-taking probabilities of shape [batch_size, seq_len, 1].
+        """
         x = self.lstm(x, training=training)
         x = self.fc(x)
         return x  # [batch_size, seq_len, 1]
@@ -246,6 +322,13 @@ class PositionalEncoding(tf.keras.layers.Layer):
         self.pe = tf.constant(pe, dtype=tf.float32)
 
     def call(self, x):
+        """
+        Args:
+            x: Input tensor of shape [batch_size, seq_len, d_model].
+
+        Returns:
+            Positional encoded tensor of the same shape.
+        """
         seq_len = tf.shape(x)[1]
         x = x + self.pe[:seq_len]
         return x
@@ -260,7 +343,9 @@ class Vocoder(tf.keras.layers.Layer):
             tf.keras.layers.Dense(d_model, activation='relu'),
             tf.keras.layers.Dense(d_model)
         ])
-        self.lstm = tf.keras.layers.Bidirectional(tf.keras.layers.LSTM(d_model // 2, return_sequences=True))
+        self.lstm = tf.keras.layers.Bidirectional(
+            tf.keras.layers.LSTM(d_model // 2, return_sequences=True)
+        )
         self.postnet = tf.keras.Sequential([
             tf.keras.layers.Conv1D(filters=d_model, kernel_size=5, padding='same', activation='tanh'),
             tf.keras.layers.BatchNormalization(),
@@ -272,6 +357,14 @@ class Vocoder(tf.keras.layers.Layer):
         ])
 
     def call(self, x, training=False):
+        """
+        Args:
+            x: Input tensor of shape [batch_size, seq_len].
+            training: Boolean indicating whether the call is during training.
+
+        Returns:
+            Generated audio waveform tensor.
+        """
         x = self.prenet(x)
         x = self.lstm(x, training=training)
         x = self.postnet(x, training=training)

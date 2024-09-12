@@ -2,41 +2,52 @@ import tensorflow as tf
 from tqdm import tqdm
 
 def train(model, dataset, optimizer, loss_fn, num_epochs):
+    """
+    Training loop for the model.
+
+    Args:
+        model: The LSLM model instance.
+        dataset: The training dataset.
+        optimizer: The optimizer instance.
+        loss_fn: The loss function.
+        num_epochs: Number of epochs to train.
+    """
+    train_loss = tf.keras.metrics.Mean(name='train_loss')
+
     @tf.function
-    def train_step(tts_samples, combined_audios, tokenized_texts):
+    def train_step(speaking_input, listening_input, target):
         with tf.GradientTape() as tape:
-            output = model([tokenized_texts, combined_audios], training=True)
-            loss = loss_fn(tts_samples, output)
+            predictions = model((speaking_input, listening_input), training=True)
+            loss = loss_fn(target, predictions)
         gradients = tape.gradient(loss, model.trainable_variables)
         optimizer.apply_gradients(zip(gradients, model.trainable_variables))
-        return loss
+        train_loss(loss)
 
     for epoch in range(num_epochs):
-        total_loss = 0
-        num_batches = 0
-        
+        train_loss.reset_states()
         for batch in tqdm(dataset, desc=f"Epoch {epoch+1}/{num_epochs}"):
             tts_samples, combined_audios, tokenized_texts = batch
-            loss = train_step(tts_samples, combined_audios, tokenized_texts)
-            total_loss += loss
-            num_batches += 1
-
-        avg_loss = total_loss / num_batches
-        print(f"Epoch {epoch+1}/{num_epochs}, Average Loss: {avg_loss:.4f}")
+            train_step(tokenized_texts, combined_audios, tokenized_texts)
+        print(f"Epoch {epoch+1}, Loss: {train_loss.result():.4f}")
 
 def evaluate(model, dataset, loss_fn):
-    @tf.function
-    def eval_step(tts_samples, combined_audios, tokenized_texts):
-        output = model([tokenized_texts, combined_audios], training=False)
-        return loss_fn(tts_samples, output)
+    """
+    Evaluation loop for the model.
 
-    total_loss = 0
-    num_batches = 0
+    Args:
+        model: The LSLM model instance.
+        dataset: The evaluation dataset.
+        loss_fn: The loss function.
+    """
+    eval_loss = tf.keras.metrics.Mean(name='eval_loss')
+
+    @tf.function
+    def eval_step(speaking_input, listening_input, target):
+        predictions = model((speaking_input, listening_input), training=False)
+        loss = loss_fn(target, predictions)
+        eval_loss(loss)
 
     for batch in dataset:
         tts_samples, combined_audios, tokenized_texts = batch
-        loss = eval_step(tts_samples, combined_audios, tokenized_texts)
-        total_loss += loss
-        num_batches += 1
-
-    return total_loss / num_batches
+        eval_step(tokenized_texts, combined_audios, tokenized_texts)
+    return eval_loss.result()
