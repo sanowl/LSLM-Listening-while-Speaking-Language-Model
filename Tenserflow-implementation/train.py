@@ -18,6 +18,9 @@ def train(model, dataset, optimizer, loss_fn, num_epochs):
     def train_step(speaking_input, listening_input, target):
         with tf.GradientTape() as tape:
             predictions = model((speaking_input, listening_input), training=True)
+            # Flatten predictions and target for loss computation
+            predictions = tf.reshape(predictions, [-1, model.vocab_size + 1])
+            target = tf.reshape(target, [-1])
             loss = loss_fn(target, predictions)
         gradients = tape.gradient(loss, model.trainable_variables)
         optimizer.apply_gradients(zip(gradients, model.trainable_variables))
@@ -38,12 +41,18 @@ def evaluate(model, dataset, loss_fn):
         model: The LSLM model instance.
         dataset: The evaluation dataset.
         loss_fn: The loss function.
+
+    Returns:
+        Average loss over the evaluation dataset.
     """
     eval_loss = tf.keras.metrics.Mean(name='eval_loss')
 
     @tf.function
     def eval_step(speaking_input, listening_input, target):
         predictions = model((speaking_input, listening_input), training=False)
+        # Flatten predictions and target for loss computation
+        predictions = tf.reshape(predictions, [-1, model.vocab_size + 1])
+        target = tf.reshape(target, [-1])
         loss = loss_fn(target, predictions)
         eval_loss(loss)
 
