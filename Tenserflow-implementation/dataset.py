@@ -1,44 +1,39 @@
 import tensorflow as tf
-import tensorflow_io as tfio
-from transformers import Wav2Vec2FeatureExtractor
+from transformers import Wav2Vec2Tokenizer
 import numpy as np
 
 SAMPLE_RATE = 16000
 MAX_AUDIO_LENGTH = 10  # seconds
+MAX_AUDIO_SAMPLES = SAMPLE_RATE * MAX_AUDIO_LENGTH
 
-class LSLMDataset(tf.data.Dataset):
+class LSLMDataset:
     """
-    Custom dataset for the LSLM model.
+    Dataset class for the LSLM model.
+    Generates synthetic data for training and evaluation.
     """
-    def __new__(cls, num_samples=1000, max_length=MAX_AUDIO_LENGTH * SAMPLE_RATE):
-        return tf.data.Dataset.from_generator(
-            cls._generator,
-            args=(num_samples, max_length),
-            output_signature=(
-                tf.TensorSpec(shape=(max_length,), dtype=tf.float32),
-                tf.TensorSpec(shape=(max_length,), dtype=tf.float32),
-                tf.TensorSpec(shape=(None,), dtype=tf.int32)
-            )
-        )
+    def __init__(self, num_samples=1000):
+        self.num_samples = num_samples
+        self.tokenizer = Wav2Vec2Tokenizer.from_pretrained("facebook/wav2vec2-base")
 
-    @staticmethod
-    def _generator(num_samples, max_length):
-        tokenizer = Wav2Vec2FeatureExtractor.from_pretrained("facebook/wav2vec2-base")
-        # Generate dummy data
-        for i in range(num_samples):
-            # Generate random audio samples and texts
-            tts_sample = tf.random.normal((max_length,))
-            text = f"Sample text {i}"
-            tokenized_text = tokenizer(text, return_tensors="tf").input_values[0]
+    def __len__(self):
+        return self.num_samples
 
-            # Simulate interruption and noise
-            interruption = tf.random.normal((SAMPLE_RATE,))
-            noise = tf.random.normal((max_length,))
+    def __getitem__(self, idx):
+        # Generate random audio samples and texts
+        tts_sample = tf.random.normal((MAX_AUDIO_SAMPLES,))
+        text = f"Sample text {idx}"
+        tokenized_text = self.tokenizer(text, return_tensors="tf").input_ids[0]
 
-            # Combine TTS sample with interruption and noise
-            combined_audio = tts_sample + tf.pad(interruption, [[0, max_length - SAMPLE_RATE]]) + add_noise(tts_sample, snr_db=10)
+        # Simulate interruption and noise
+        interruption_length = tf.random.uniform((), minval=1, maxval=SAMPLE_RATE, dtype=tf.int32)
+        interruption = tf.random.normal((interruption_length,))
+        noise = tf.random.normal((MAX_AUDIO_SAMPLES,))
 
-            yield tts_sample, combined_audio, tf.cast(tokenized_text, tf.int32)
+        # Combine TTS sample with interruption and noise
+        interruption_padded = tf.pad(interruption, [[0, MAX_AUDIO_SAMPLES - interruption_length]])
+        combined_audio = tts_sample + interruption_padded + add_noise(tts_sample, snr_db=10)
+
+        return tts_sample, combined_audio, tf.cast(tokenized_text, tf.int32)
 
 def add_noise(audio, snr_db):
     """
@@ -47,26 +42,53 @@ def add_noise(audio, snr_db):
     Args:
         audio: Input audio signal.
         snr_db: Desired Signal-to-Noise Ratio in decibels.
+
+    Returns:
+        Noisy audio signal.
     """
     signal_power = tf.reduce_mean(tf.square(audio))
     noise_power = signal_power / tf.pow(10.0, snr_db / 10.0)
     noise = tf.random.normal(tf.shape(audio), stddev=tf.sqrt(noise_power))
     return audio + noise
 
-def create_tf_dataset(dataset, batch_size=32):
+def create_tf_dataset(dataset, batch_size=32, shuffle=True):
     """
     Converts the custom dataset into a batched TensorFlow dataset.
 
     Args:
         dataset: The LSLMDataset instance.
         batch_size: Number of samples per batch.
+        shuffle: Whether to shuffle the dataset.
+
+    Returns:
+        A tf.data.Dataset object.
     """
-    return dataset.padded_batch(
+    def generator():
+        for i in range(len(dataset)):
+            yield dataset[i]
+
+    output_signature = (
+        tf.TensorSpec(shape=(MAX_AUDIO_SAMPLES,), dtype=tf.float32),
+        tf.TensorSpec(shape=(MAX_AUDIO_SAMPLES,), dtype=tf.float32),
+        tf.TensorSpec(shape=(None,), dtype=tf.int32)
+    )
+
+    tf_dataset = tf.data.Dataset.from_generator(
+        generator,
+        output_signature=output_signature
+    )
+
+    if shuffle:
+        tf_dataset = tf_dataset.shuffle(buffer_size=1000)
+
+    tf_dataset = tf_dataset.padded_batch(
         batch_size,
         padded_shapes=(
-            [MAX_AUDIO_LENGTH * SAMPLE_RATE],
-            [MAX_AUDIO_LENGTH * SAMPLE_RATE],
+            [MAX_AUDIO_SAMPLES],
+            [MAX_AUDIO_SAMPLES],
             [None]
         ),
         padding_values=(0.0, 0.0, 0)
-    )
+    ).prefetch(tf.data.AUTOTUNE)
+
+    return tf_dataset
