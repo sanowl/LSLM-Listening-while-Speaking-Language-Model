@@ -22,7 +22,7 @@ class LSLM(tf.keras.Model):
         self.vocoder = Vocoder(d_model, num_audio_tokens)
 
         # Special token for interrupt requests
-        self.irq_token = vocab_size  # Assuming IRQ token is at the end of the vocabulary
+        self.irq_token = vocab_size  
 
     def call(self, inputs: Tuple[tf.Tensor, tf.Tensor], training=False):
         """
