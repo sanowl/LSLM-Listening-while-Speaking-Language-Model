@@ -2,6 +2,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 from flax.training import train_state
+from transformers import AutoTokenizer
 
 def command_based_fdm_test(model, test_data, command, params):
     interruptions = 0
@@ -54,6 +55,7 @@ def analyze_turn_taking(model, test_data, params):
     print(f"F1 Score: {f1_score:.4f}")
 
 def generate_speech(model, text, params):
-    tokenized_text = model.speaking_encoder.tokenizer(text, return_tensors="jax").input_values
+    tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
+    tokenized_text = tokenizer(text, return_tensors="jax").input_ids
     generated_audio = model.apply(params, tokenized_text, is_training=False, method=model.generate)
     return np.array(jax.device_get(generated_audio))

@@ -1,4 +1,5 @@
 import tensorflow as tf
+from transformers import AutoTokenizer
 
 def command_based_fdm_test(model, test_data, command):
     interruptions = 0
@@ -53,6 +54,7 @@ def analyze_turn_taking(model, test_data):
     print(f"F1 Score: {f1_score:.4f}")
 
 def generate_speech(model, text):
-    tokenized_text = model.speaking_encoder.tokenizer(text, return_tensors="tf").input_values
+    tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
+    tokenized_text = tokenizer(text, return_tensors="tf").input_ids
     generated_audio = model.generate(tokenized_text)
     return generated_audio.numpy()

@@ -1,4 +1,5 @@
 import torch
+from transformers import AutoTokenizer
 
 def command_based_fdm_test(model, test_data, command, device):
     model.eval()
@@ -58,6 +59,7 @@ def analyze_turn_taking(model, test_data, device):
 def generate_speech(model, text, device):
     model.eval()
     with torch.no_grad():
-        tokenized_text = model.speaking_encoder.tokenizer(text, return_tensors="pt").input_values.to(device)
+        tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
+        tokenized_text = tokenizer(text, return_tensors="pt").input_ids.to(device)
         generated_audio = model.generate(tokenized_text)
         return generated_audio.cpu().numpy()
