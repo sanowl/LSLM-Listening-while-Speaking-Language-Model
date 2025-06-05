@@ -6,6 +6,7 @@ import torchaudio
 from typing import List, Tuple
 from model import LSLM
 from dataset import LSLMDataset, collate_fn
+from transformers import AutoTokenizer
 from train import train, evaluate
 from visualization import visualize_attention, visualize_quantization
 from tests import command_based_fdm_test, voice_based_fdm_test, analyze_turn_taking, generate_speech
@@ -65,7 +66,8 @@ def main() -> None:
 
     # Command-based FDM test
     command_test_data: List[Tuple[torch.Tensor, str]] = [(torch.randn(MAX_AUDIO_LENGTH * SAMPLE_RATE), "Honey") for _ in range(100)]
-    command: torch.Tensor = model.speaking_encoder.tokenizer("Honey", return_tensors="pt").input_values.to(device)
+    tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
+    command: torch.Tensor = tokenizer("Honey", return_tensors="pt").input_ids.to(device)
     command_based_fdm_test(model, command_test_data, command, device)
 
     # Voice-based FDM test
