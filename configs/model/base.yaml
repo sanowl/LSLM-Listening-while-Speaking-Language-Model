@@ -1,0 +1,95 @@
+# Base LSLM Model Configuration
+# This configuration provides a balanced setup for most use cases
+
+model:
+  # Core architecture
+  hidden_size: 768
+  num_attention_heads: 12
+  num_hidden_layers: 12
+  intermediate_size: 3072
+  vocab_size: 30522
+
+  # Dropout and regularization
+  hidden_dropout_prob: 0.1
+  attention_probs_dropout_prob: 0.1
+  layer_norm_eps: 1e-12
+
+  # Position and embeddings
+  max_position_embeddings: 512
+  type_vocab_size: 2
+
+  # Special tokens (BERT-compatible)
+  bos_token_id: 101  # [CLS]
+  eos_token_id: 102  # [SEP]
+  pad_token_id: 0    # [PAD]
+  unk_token_id: 100  # [UNK]
+
+  # LSLM specific
+  fusion_strategy: "cross_attention"
+  audio_hidden_size: 768
+
+training:
+  # Optimization
+  learning_rate: 5e-5
+  weight_decay: 0.01
+  adam_epsilon: 1e-8
+  max_grad_norm: 1.0
+
+  # Learning rate scheduling
+  lr_scheduler_type: "linear"
+  warmup_ratio: 0.1
+  warmup_steps: null
+
+  # Training loop
+  num_train_epochs: 10
+  per_device_train_batch_size: 8
+  per_device_eval_batch_size: 16
+  gradient_accumulation_steps: 1
+
+  # Evaluation and saving
+  eval_steps: 500
+  save_steps: 1000
+  logging_steps: 100
+  load_best_model_at_end: true
+  metric_for_best_model: "eval_loss"
+  greater_is_better: false
+
+  # Mixed precision and optimization
+  fp16: false
+  bf16: false
+  dataloader_num_workers: 4
+  dataloader_pin_memory: true
+
+  # Reproducibility
+  seed: 42
+
+data:
+  # Text processing
+  max_seq_length: 512
+  truncation: true
+  padding: "max_length"
+
+  # Audio processing
+  audio_sample_rate: 16000
+  mel_bins: 80
+  hop_length: 160
+  win_length: 400
+  n_fft: 512
+
+  # Data augmentation
+  time_masking: true
+  freq_masking: true
+  noise_prob: 0.1
+  speed_perturbation: true
+
+  # Dataset splits
+  train_split: 0.8
+  val_split: 0.1
+  test_split: 0.1
+
+# Experiment settings
+experiment_name: "lslm_base_experiment"
+output_dir: "./outputs"
+logging_dir: null
+run_name: null
+device: "auto" 
