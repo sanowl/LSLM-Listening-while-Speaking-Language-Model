@@ -4,7 +4,6 @@ import torch
 import torch.nn as nn
 import torchaudio
 import numpy as np
-import random
 from typing import Tuple, Optional, List
 from torch_audiomentations import (
     Compose, 
@@ -14,6 +13,7 @@ from torch_audiomentations import (
     Gain,
     PolarityInversion
 )
+import secrets
 
 
 class AudioAugmentation(nn.Module):
@@ -151,7 +151,7 @@ class TextAugmentation:
         
     def token_dropout(self, input_ids: torch.Tensor, mask_token_id: int = 103) -> torch.Tensor:
         """Randomly mask tokens."""
-        if random.random() > self.token_dropout_prob:
+        if secrets.SystemRandom().random() > self.token_dropout_prob:
             return input_ids
             
         mask = torch.rand_like(input_ids.float()) < 0.15
@@ -166,7 +166,7 @@ class TextAugmentation:
         
     def token_replacement(self, input_ids: torch.Tensor) -> torch.Tensor:
         """Randomly replace tokens with random vocabulary tokens."""
-        if random.random() > self.token_replacement_prob:
+        if secrets.SystemRandom().random() > self.token_replacement_prob:
             return input_ids
             
         mask = torch.rand_like(input_ids.float()) < 0.05
@@ -182,7 +182,7 @@ class TextAugmentation:
         
     def sequence_shuffle(self, input_ids: torch.Tensor) -> torch.Tensor:
         """Randomly shuffle subsequences."""
-        if random.random() > self.sequence_shuffle_prob:
+        if secrets.SystemRandom().random() > self.sequence_shuffle_prob:
             return input_ids
             
         batch_size, seq_len = input_ids.shape
@@ -190,8 +190,8 @@ class TextAugmentation:
         
         for i in range(batch_size):
             # Choose random subsequence to shuffle
-            start = random.randint(1, seq_len - 3)  # Avoid special tokens
-            end = random.randint(start + 1, seq_len - 1)
+            start = secrets.SystemRandom().randint(1, seq_len - 3)  # Avoid special tokens
+            end = secrets.SystemRandom().randint(start + 1, seq_len - 1)
             
             # Shuffle the subsequence
             subsequence = input_ids[i, start:end]
@@ -228,7 +228,7 @@ class MixedModalityAugmentation:
         labels: torch.Tensor
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, float]:
         """Apply MixUp augmentation."""
-        if random.random() > 0.5:
+        if secrets.SystemRandom().random() > 0.5:
             return audio_features, text_features, labels, 1.0
             
         batch_size = audio_features.size(0)
@@ -250,10 +250,10 @@ class MixedModalityAugmentation:
         text_features: torch.Tensor
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """Randomly drop one modality."""
-        if random.random() > self.modal_dropout_prob:
+        if secrets.SystemRandom().random() > self.modal_dropout_prob:
             return audio_features, text_features
             
-        if random.random() > 0.5:
+        if secrets.SystemRandom().random() > 0.5:
             # Drop audio
             audio_features = torch.zeros_like(audio_features)
         else:
@@ -268,13 +268,13 @@ class MixedModalityAugmentation:
         max_shift: int = 10
     ) -> torch.Tensor:
         """Add temporal misalignment between modalities."""
-        if random.random() > 0.3:
+        if secrets.SystemRandom().random() > 0.3:
             return audio_features
             
         batch_size, channels, time_steps = audio_features.shape
         
         for i in range(batch_size):
-            shift = random.randint(-max_shift, max_shift)
+            shift = secrets.SystemRandom().randint(-max_shift, max_shift)
             if shift > 0:
                 # Shift right (pad left)
                 audio_features[i, :, shift:] = audio_features[i, :, :-shift]
